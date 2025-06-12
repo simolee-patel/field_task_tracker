@@ -1,12 +1,11 @@
-const { default: mongoose } = require('mongoose');
+const mongoose = require('mongoose');
 const Task = require('../models/TaskModel');
-const { mqttClient } = require('../server');
 
 exports.getTasks = async (req, res) => {
   try {
     const tasks = await Task.find().populate('assignedTo', 'name email');
     res.json(tasks);
-  } catch (error) {
+  } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -14,19 +13,13 @@ exports.getTasks = async (req, res) => {
 exports.getTasksById = async (req, res) => {
   try {
     const userId = req.params.id;
-
-    // Validate ID
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: 'Invalid user ID' });
     }
 
-    // Find all tasks assigned to this user
-    const tasks = await Task.find({ assignedTo: userId })
-      .populate('assignedTo', 'name email'); // show user info
-
+    const tasks = await Task.find({ assignedTo: userId }).populate('assignedTo', 'name email');
     res.json(tasks);
-  } catch (error) {
-    console.error("Error fetching tasks by ID:", error);
+  } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -40,6 +33,9 @@ exports.createTask = async (req, res) => {
     let task = await Task.create(req.body);
     task = await task.populate('assignedTo', 'name email');
 
+    // Emit real-time event
+    req.io.emit('taskCreated', task);
+
     res.status(201).json(task);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -48,9 +44,12 @@ exports.createTask = async (req, res) => {
 
 exports.updateTask = async (req, res) => {
   try {
-    const task = await Task.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const task = await Task.findByIdAndUpdate(req.params.id, req.body, { new: true }).populate('assignedTo', 'name email');
     if (!task) return res.status(404).json({ message: 'Task not found' });
-    // mqttClient.publish('tasks/updates', JSON.stringify({ action: 'update', task }));
+
+    // Emit real-time event
+    req.io.emit('taskUpdated', task);
+
     res.json(task);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -61,6 +60,10 @@ exports.deleteTask = async (req, res) => {
   try {
     const task = await Task.findByIdAndDelete(req.params.id);
     if (!task) return res.status(404).json({ message: 'Task not found' });
+
+    // Emit real-time event
+    req.io.emit('taskDeleted', { id: req.params.id });
+
     res.json({ message: 'Task deleted' });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
